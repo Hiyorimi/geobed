@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/gob"
-	geohash "github.com/TomiHiltunen/geohash-golang"
 	"io"
 	"log"
 	"net/http"
@@ -15,16 +14,30 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	geohash "github.com/TomiHiltunen/geohash-golang"
 )
 
-// There are over 2.4 million cities in the world. The Geonames data set only contains 143,270 and the MaxMind set contains 567,382 and 3,173,959 in the other MaxMind set.
-// Obviously there's a lot of overlap and the worldcitiespop.txt from MaxMind contains a lot of dupes, though it by far the most comprehensive in terms of city - lat/lng.
-// It may not be possible to have information for all cities, but many of the cities are also fairly remote and likely don't have internet access anyway.
-// The Geonames data is preferred because it contains additional information such as elevation, population, and more. Population is good particuarly nice because a sense for
-// the city size can be understood by applications. So showing all major cities is pretty easy. Though the primary goal of this package is to geocode, the additional information
-// is bonus. So after checking the Geonames set, the geocoding functions will then look at MaxMind's.
-// Maybe in the future this package will even use the Geonames premium data and have functions to look up nearest airports, etc.
-// I would simply use just Geonames data, but there's so many more cities in the MaxMind set despite the lack of additional details.
+// There are over 2.4 million cities in the world. The Geonames data set only
+// contains 143,270 and the MaxMind set contains 567,382 and 3,173,959 in the
+//  other MaxMind set.
+// Obviously there's a lot of overlap and the worldcitiespop.txt from MaxMind
+// contains a lot of dupes, though it by far the most comprehensive in terms
+//  of city - lat/lng.
+// It may not be possible to have information for all cities, but many of the
+// cities are also fairly remote and likely don't have internet access anyway.
+// The Geonames data is preferred because it contains additional information
+// such as elevation, population, and more. Population is good particuarly nice
+//  because a sense for
+// the city size can be understood by applications. So showing all major
+// cities is pretty easy. Though the primary goal of this package is to
+//  geocode, the additional information
+// is bonus. So after checking the Geonames set, the geocoding functions
+// will then look at MaxMind's.
+// Maybe in the future this package will even use the Geonames premium data
+// and have functions to look up nearest airports, etc.
+// I would simply use just Geonames data, but there's so many more cities
+// in the MaxMind set despite the lack of additional details.
 //
 // http://download.geonames.org/export/dump/cities1000.zip
 // http://geolite.maxmind.com/download/geoip/database/GeoLiteCity_CSV/GeoLiteCity-latest.zip
@@ -32,10 +45,14 @@ import (
 
 // A list of data sources.
 var dataSetFiles = []map[string]string{
-	{"url": "http://download.geonames.org/export/dump/cities1000.zip", "path": "./geobed-data/cities1000.zip", "id": "geonamesCities1000"},
-	{"url": "http://download.geonames.org/export/dump/countryInfo.txt", "path": "./geobed-data/countryInfo.txt", "id": "geonamesCountryInfo"},
-	{"url": "http://download.maxmind.com/download/worldcities/worldcitiespop.txt.gz", "path": "./geobed-data/worldcitiespop.txt.gz", "id": "maxmindWorldCities"},
-	//{"url": "http://geolite.maxmind.com/download/geoip/database/GeoLiteCity_CSV/GeoLiteCity-latest.zip", "path": "./geobed-data/GeoLiteCity-latest.zip", "id": "maxmindLiteCity"},
+	{"url": "http://download.geonames.org/export/dump/cities1000.zip", 
+	"path": "./geobed-data/cities1000.zip", "id": "geonamesCities1000"},
+	{"url": "http://download.geonames.org/export/dump/countryInfo.txt", 
+	"path": "./geobed-data/countryInfo.txt", "id": "geonamesCountryInfo"},
+	{"url": "http://download.maxmind.com/download/worldcities/worldcitiespop.txt.gz", 
+	"path": "./geobed-data/worldcitiespop.txt.gz", "id": "maxmindWorldCities"},
+	//{"url": "http://geolite.maxmind.com/download/geoip/database/GeoLiteCity_CSV/GeoLiteCity-latest.zip", 
+	"path": "./geobed-data/GeoLiteCity-latest.zip", "id": "maxmindLiteCity"},
 }
 
 // A handy map of US state codes to full names.
@@ -106,7 +123,8 @@ var UsSateCodes = map[string]string{
 	"AP": "Armed Forces Pacific",
 }
 
-// Contains all of the city and country data. Cities are split into buckets by country to increase lookup speed when the country is known.
+// Contains all of the city and country data. Cities are split into buckets by
+// country to increase lookup speed when the country is known.
 type GeoBed struct {
 	c  Cities
 	co []CountryInfo
@@ -124,12 +142,16 @@ func (c Cities) Less(i, j int) bool {
 	return toLower(c[i].City) < toLower(c[j].City)
 }
 
-// A combined city struct (the various data sets have different fields, this combines what's available and keeps things smaller).
+// GeobedCity is combined city struct (the various data sets have different
+// fields, this combines what's available and keeps things smaller).
 type GeobedCity struct {
 	City    string
 	CityAlt string
-	// TODO: Think about converting this to a small int to save on memory allocation. Lookup requests can have the strings converted to the same int if there are any matches.
-	// This could make lookup more accurate, easier, and faster even. IF the int uses less bytes than the two letter code string.
+	// TODO: Think about converting this to a small int to save on memory 
+	// allocation. Lookup requests can have the strings converted to the 
+	// same int if there are any matches.
+	// This could make lookup more accurate, easier, and faster even. IF
+	// the int uses less bytes than the two letter code string.
 	Country    string
 	Region     string
 	Latitude   float64
@@ -147,13 +169,18 @@ type GeobedCity struct {
 
 var maxMindCityDedupeIdx map[string][]string
 
-// Holds information about the index ranges for city names (1st and 2nd characters) to help narrow down sets of the GeobedCity slice to scan when looking for a match.
+// Holds information about the index ranges for city names (1st and 2nd 
+// characters) to help narrow down sets of the GeobedCity slice to scan 
+// when looking for a match.
 var cityNameIdx map[string]int
 var locationDedupeIdx map[string]bool
 
-// Information about each country from Geonames including; ISO codes, FIPS, country capital, area (sq km), population, and more.
-// Particularly useful for validating a location string contains a country name which can help the search process.
-// Adding to this info, a slice of partial geohashes to help narrow down reverse geocoding lookups (maps to country buckets).
+// Information about each country from Geonames including; ISO codes, FIPS,
+// country capital, area (sq km), population, and more.
+// Particularly useful for validating a location string contains a country 
+// name which can help the search process.
+// Adding to this info, a slice of partial geohashes to help narrow down 
+// reverse geocoding lookups (maps to country buckets).
 type CountryInfo struct {
 	Country            string
 	Capital            string
@@ -176,18 +203,22 @@ type CountryInfo struct {
 	EquivalentFipsCode string
 }
 
-// Options when geocoding. For now just an exact match on city name, but there will be potentially other options that can be set to adjust how searching/matching works.
+// Options when geocoding. For now just an exact match on city name, but 
+// there will be potentially other options that can be set to adjust how 
+// searching/matching works.
 type GeocodeOptions struct {
 	ExactCity bool
 }
 
-// An index range struct that's used for narrowing down ranges over the large Cities struct.
+// An index range struct that's used for narrowing down ranges over the 
+// large Cities struct.
 type r struct {
 	f int
 	t int
 }
 
-// Creates a new Geobed instance. You do not need more than one. You do not want more than one. There's a fair bit of data to load into memory.
+// Creates a new Geobed instance. You do not need more than one. You do 
+// not want more than one. There's a fair bit of data to load into memory.
 func NewGeobed() GeoBed {
 	g := GeoBed{}
 
@@ -220,7 +251,8 @@ func (g *GeoBed) downloadDataSets() {
 					if rErr == nil {
 						_, nErr := io.Copy(out, r.Body)
 						if nErr != nil {
-							// log.Println("Failed to copy data file, it will be tried again on next application start.")
+							// log.Println("Failed to copy data file, it will be tried again
+							//  on next application start.")
 							// remove file so another attempt can be made, should something fail
 							err = os.Remove(f["path"])
 						}
@@ -256,8 +288,10 @@ func (g *GeoBed) loadDataSets() {
 				}
 				defer fi.Close()
 
-				// Geonames uses a tab delineated format and it's not even consistent. No CSV reader that I've found for Go can understand this.
-				// I'm not expecting any reader to either because it's an invalid CSV to be frank. However, we can still split up each row by \t
+				// Geonames uses a tab delineated format and it's not even 
+				// consistent. No CSV reader that I've found for Go can understand this.
+				// I'm not expecting any reader to either because it's an 
+				// invalid CSV to be frank. However, we can still split up each row by \t
 				scanner := bufio.NewScanner(fi)
 				scanner.Split(bufio.ScanLines)
 
@@ -265,15 +299,24 @@ func (g *GeoBed) loadDataSets() {
 				for scanner.Scan() {
 					i++
 
-					// So regexp, sadly, must be used (well, unless I wanted parse each string byte by byte, pushing each into a buffer to append to a slice until a tab is reached, etc.).
-					// But I'd have to also then put in a condition if the next byte was a \t rune, then append an empty string, etc. This just, for now, seems nicer (easier).
-					// This is only an import/update, so it shouldn't be an issue for performance. If it is, then I'll look into other solutions.
+					// So regexp, sadly, must be used (well, unless I wanted parse
+					//  each string byte by byte, pushing each into a buffer to 
+					// append to a slice until a tab is reached, etc.).
+					// But I'd have to also then put in a condition if the next 
+					// byte was a \t rune, then append an empty string, etc. This
+					//  just, for now, seems nicer (easier).
+					// This is only an import/update, so it shouldn't be an issue
+					//  for performance. If it is, then I'll look into other solutions.
 					fields := regexp.MustCompile("\t").Split(scanner.Text(), 19)
 
-					// NOTE: Now using a combined GeobedCity struct since not all data sets have the same fields.
-					// Plus, the entire point was to geocode forward and reverse. Bonus information like elevation and such is just superfluous.
-					// Leaving it here because it may be configurable... If options are passed to NewGeobed() then maybe Geobed can simply be a Geonames search.
-					// Don't even load in MaxMind data...And if that's the case, maybe that bonus information is desired.
+					// NOTE: Now using a combined GeobedCity struct since not all 
+					// data sets have the same fields.
+					// Plus, the entire point was to geocode forward and reverse.
+					//  Bonus information like elevation and such is just superfluous.
+					// Leaving it here because it may be configurable... If options
+					//  are passed to NewGeobed() then maybe Geobed can simply be a Geonames search.
+					// Don't even load in MaxMind data...And if that's the case,
+					//  maybe that bonus information is desired.
 					if len(fields) == 19 {
 						//id, _ := strconv.Atoi(fields[0])
 						lat, _ := strconv.ParseFloat(fields[4], 64)
@@ -298,7 +341,9 @@ func (g *GeoBed) loadDataSets() {
 						c.Population = int32(pop)
 						c.Geohash = gh
 
-						// Don't include entries without a city name. If we want to geocode the centers of countries and states, then we can do that faster through other means.
+						// Don't include entries without a city name. If we want to
+						// geocode the centers of countries and states, then we can
+						// do that faster through other means.
 						if len(c.City) > 0 {
 							g.c = append(g.c, c)
 						}
@@ -307,7 +352,8 @@ func (g *GeoBed) loadDataSets() {
 			}
 		}
 
-		// ...And this one is Gzipped (and this one may have worked with the CSV package, but parse it the same way as the others line by line)
+		// ...And this one is Gzipped (and this one may have worked with the CSV
+		// package, but parse it the same way as the others line by line)
 		if f["id"] == "maxmindWorldCities" {
 			// It also has a lot of dupes
 			maxMindCityDedupeIdx = make(map[string][]string)
@@ -345,14 +391,16 @@ func (g *GeoBed) loadDataSets() {
 				}
 			}
 
-			// Loop the map of fields after dupes have been removed (about 1/5th less... 2.6m vs 3.1m inreases lookup performance).
+			// Loop the map of fields after dupes have been removed (about 1/5th
+			// less... 2.6m vs 3.1m inreases lookup performance).
 			for _, fields := range maxMindCityDedupeIdx {
 				if fields[0] != "" && fields[0] != "0" {
 					if fields[2] != "AccentCity" {
 						pop, _ := strconv.Atoi(fields[4])
 						lat, _ := strconv.ParseFloat(fields[5], 64)
 						lng, _ := strconv.ParseFloat(fields[6], 64)
-						// MaxMind's data set is a bit dirty. I've seen city names surrounded by parenthesis in a few places.
+						// MaxMind's data set is a bit dirty. I've seen city names
+						// surrounded by parenthesis in a few places.
 						cn := strings.Trim(string(fields[2]), " ")
 						cn = strings.Trim(cn, "( )")
 
@@ -381,7 +429,9 @@ func (g *GeoBed) loadDataSets() {
 							c.Population = int32(pop)
 							c.Geohash = gh
 
-							// Don't include entries without a city name. If we want to geocode the centers of countries and states, then we can do that faster through other means.
+							// Don't include entries without a city name. If we want
+							// to geocode the centers of countries and states, then
+							// we can do that faster through other means.
 							if len(c.City) > 0 && len(c.Country) > 0 {
 								g.c = append(g.c, c)
 							}
@@ -389,7 +439,8 @@ func (g *GeoBed) loadDataSets() {
 					}
 				}
 			}
-			// Clear out the temrporary index (set to nil, it does get re-created) so that Go can garbage collect it at some point whenever it feels the need.
+			// Clear out the temrporary index (set to nil, it does get re-created)
+			// so that Go can garbage collect it at some point whenever it feels the need.
 			maxMindCityDedupeIdx = nil
 			locationDedupeIdx = nil
 		}
@@ -450,20 +501,23 @@ func (g *GeoBed) loadDataSets() {
 		}
 	}
 
-	// Sort []GeobedCity by city names to help with binary search (the City field is the most searched upon field and the matching names can be easily filtered down from there).
+	// Sort []GeobedCity by city names to help with binary search (the City field is the
+	// most searched upon field and the matching names can be easily filtered down from there).
 	sort.Sort(g.c)
 
 	//debug
 	//log.Println("TOTAL RECORDS:")
 	//log.Println(len(g.c))
 
-	// Index the locations of city names in the g.c []GeoCity slice. This way when searching the range can be limited so it will be faster.
+	// Index the locations of city names in the g.c []GeoCity slice. This way when
+	// searching the range can be limited so it will be faster.
 	cityNameIdx = make(map[string]int)
 	for k, v := range g.c {
 		// Get the index key for the first character of the city name.
 		ik := toLower(string(v.City[0]))
 		if val, ok := cityNameIdx[ik]; ok {
-			// If this key number is greater than what was previously recorded, then set it as the new indexed key.
+			// If this key number is greater than what was previously recorded,
+			// then set it as the new indexed key.
 			if val < k {
 				cityNameIdx[ik] = k
 			}
@@ -476,7 +530,8 @@ func (g *GeoBed) loadDataSets() {
 		// if len(v.CityLower) >= 2 {
 		// 	ik2 := v.CityLower[0:2]
 		// 	if val, ok := cityNameIdx[ik2]; ok {
-		// 		// If this key number is greater than what was previously recorded, then set it as the new indexed key.
+		// 		// If this key number is greater than what was previously
+		//		// recorded, then set it as the new indexed key.
 		// 		if val < k {
 		// 			cityNameIdx[ik2] = k
 		// 		}
@@ -504,16 +559,20 @@ func (g *GeoBed) Geocode(n string, opts ...GeocodeOptions) GeobedCity {
 	if options.ExactCity {
 		c = g.exactMatchCity(n)
 	} else {
-		// NOTE: The downside of this (currently) is that something is basically always returned. It's a best guess.
-		// There's not much chance of it returning "not found" (or an empty GeobedCity struct).
-		// If you'd rather have nothing returned if not found, look at more exact matching options.
+		// NOTE: The downside of this (currently) is that something is basically
+		// always returned. It's a best guess.
+		// There's not much chance of it returning "not found" (or an empty
+		// GeobedCity struct).
+		// If you'd rather have nothing returned if not found, look at
+		// more exact matching options.
 		c = g.fuzzyMatchLocation(n)
 	}
 
 	return c
 }
 
-// Returns a GeobedCity only if there is an exact city name match. A stricter match, though if state or country are missing a guess will be made.
+// Returns a GeobedCity only if there is an exact city name match. A stricter
+// match, though if state or country are missing a guess will be made.
 func (g *GeoBed) exactMatchCity(n string) GeobedCity {
 	var c GeobedCity
 	// Ignore the `abbrevSlice` value for now. Use `nCo` and `nSt` for more accuracy.
@@ -538,8 +597,10 @@ func (g *GeoBed) exactMatchCity(n string) GeobedCity {
 				matchingCities = append(matchingCities, v)
 			}
 			// Each piece - doesn't make sense for now. May revisit this.
-			// ie. "New York" or "New" and "York" ... well, "York" is going to match a different city.
-			// While that might be weeded out next, who knows. It's starting to get more fuzzy than I'd like for this function.
+			// ie. "New York" or "New" and "York" ... well, "York" is going
+			// to match a different city.
+			// While that might be weeded out next, who knows. It's starting
+			// to get more fuzzy than I'd like for this function.
 			// for _, np := range nSlice {
 			// 	if strings.EqualFold(np, v.City) {
 			// 		matchingCities = append(matchingCities, v)
@@ -553,7 +614,8 @@ func (g *GeoBed) exactMatchCity(n string) GeobedCity {
 		return matchingCities[0]
 		// If more than one was found, we need to guess.
 	} else if len(matchingCities) > 1 {
-		// Then range over those matching cities and try to figure out which one it is - city names are unfortunately not unique of course.
+		// Then range over those matching cities and try to figure out which
+		// one it is - city names are unfortunately not unique of course.
 		// There shouldn't be very many so I don't mind the multiple loops.
 		for _, city := range matchingCities {
 			// Was the state abbreviation present? That sounds promising.
@@ -563,14 +625,17 @@ func (g *GeoBed) exactMatchCity(n string) GeobedCity {
 		}
 
 		for _, city := range matchingCities {
-			// Matches the state and country? Likely the best scenario, I'd call it the best match.
+			// Matches the state and country? Likely the best scenario, 
+			// I'd call it the best match.
 			if strings.EqualFold(nSt, city.Region) && strings.EqualFold(nCo, city.Country) {
 				c = city
 			}
 		}
 
-		// If we still don't have a city, maybe we have a country with the city name, ie. "New York, USA"
-		// This is tougher because there's a "New York" in Florida, Kentucky, and more. Let's use population to assist if we can.
+		// If we still don't have a city, maybe we have a country with the
+		// city name, ie. "New York, USA"
+		// This is tougher because there's a "New York" in Florida, Kentucky,
+		// and more. Let's use population to assist if we can.
 		if c.City == "" {
 			matchingCountryCities := []GeobedCity{}
 			for _, city := range matchingCities {
@@ -579,8 +644,10 @@ func (g *GeoBed) exactMatchCity(n string) GeobedCity {
 				}
 			}
 
-			// If someone says, "New York, USA" they most likely mean New York, NY because it's the largest city.
-			// Specific locations are often implied based on size or popularity even though the names aren't unique.
+			// If someone says, "New York, USA" they most likely mean 
+			// New York, NY because it's the largest city.
+			// Specific locations are often implied based on size or 
+			// popularity even though the names aren't unique.
 			biggestCity := GeobedCity{}
 			for _, city := range matchingCountryCities {
 				if city.Population > biggestCity.Population {
@@ -597,8 +664,10 @@ func (g *GeoBed) exactMatchCity(n string) GeobedCity {
 // When geocoding, this provides a scored best match.
 func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
 	nCo, nSt, abbrevSlice, nSlice := g.extractLocationPieces(n)
-	// Take the reamining unclassified pieces (those not likely to be abbreviations) and get our search range.
-	// These pieces are likely contain the city name. Narrowing down the search range will make the lookup faster.
+	// Take the reamining unclassified pieces (those not likely to be 
+	// abbreviations) and get our search range.
+	// These pieces are likely contain the city name. Narrowing down 
+	// the search range will make the lookup faster.
 	ranges := g.getSearchRange(nSlice)
 
 	var bestMatchingKeys = map[int]int{}
@@ -610,16 +679,20 @@ func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
 		for _, v := range g.c[rng.f:rng.t] {
 			currentKey++
 
-			// Mainly useful for strings like: "Austin, TX" or "Austin TX" (locations with US state codes). Smile if your location string is this simple.
+			// Mainly useful for strings like: "Austin, TX" or "Austin TX" 
+			// (locations with US state codes). Smile if your location string is this simple.
 			if nSt != "" {
 				if strings.EqualFold(n, v.City) && strings.EqualFold(nSt, v.Region) {
 					return v
 				}
 			}
 
-			// Special case. Airport codes and other short 3 letter abbreviations, ie. NYC and SFO
-			// Country codes could present problems here. It seems to work for NYC, but not SFO (which there are multiple SFOs actually).
-			// Leaving it for now, but airport codes are tricky (though they are popular on Twitter). These must be exact (case sensitive) matches.
+			// Special case. Airport codes and other short 3 letter abbreviations,
+			// ie. NYC and SFO
+			// Country codes could present problems here. It seems to work for NYC,
+			// but not SFO (which there are multiple SFOs actually).
+			// Leaving it for now, but airport codes are tricky (though they are 
+			// popular on Twitter). These must be exact (case sensitive) matches.
 			// if len(n) == 3 {
 			// 	alts := strings.Split(v.CityAlt, ",")
 			// 	for _, altV := range alts {
@@ -722,8 +795,12 @@ func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
 					}
 				}
 
-				// If there's an exat match, maybe there was noise in the string so it could be the full city name, but unlikely. For example, "New" or "Los" is in many city names.
-				// Still, give it a point because it could be the bulkier part of a city name (or the city name could be one word). This has helped in some cases.
+				// If there's an exat match, maybe there was noise in the string
+				// so it could be the full city name, but unlikely. For
+				// example, "New" or "Los" is in many city names.
+				// Still, give it a point because it could be the bulkier part
+				// of a city name (or the city name could be one word). 
+				// This has helped in some cases.
 				if strings.EqualFold(v.City, ns) {
 					if val, ok := bestMatchingKeys[currentKey]; ok {
 						bestMatchingKeys[currentKey] = val + 1
@@ -751,7 +828,8 @@ func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
 				hp = g.c[k].Population
 			}
 		}
-		// Add a point for having the highest population (if any of the results had population data available).
+		// Add a point for having the highest population (if any of the results
+		// had population data available).
 		if g.c[hpk].Population > 0 {
 			bestMatchingKeys[hpk] = bestMatchingKeys[hpk] + 1
 		}
@@ -764,8 +842,10 @@ func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
 			bestMatchingKey = k
 		}
 
-		// If there is a tie breaker, use the city with the higher population (if known) because it's more likely to be what is meant.
-		// For example, when people say "New York" they typically mean New York, NY...Though there are many New Yorks.
+		// If there is a tie breaker, use the city with the higher population
+		// (if known) because it's more likely to be what is meant.
+		// For example, when people say "New York" they typically mean 
+		// New York, NY...Though there are many New Yorks.
 		if v == m {
 			if g.c[k].Population > g.c[bestMatchingKey].Population {
 				bestMatchingKey = k
@@ -787,9 +867,12 @@ func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
 	return g.c[bestMatchingKey]
 }
 
-// Splits a string up looking for potential abbreviations by matching against a shorter list of abbreviations.
-// Returns country, state, a slice of strings with potential abbreviations (based on size; 2 or 3 characters), and then a slice of the remaning pieces.
-// This does a good job at separating things that are clearly abbreviations from the city so that searching is faster and more accuarate.
+// Splits a string up looking for potential abbreviations by matching against
+// a shorter list of abbreviations.
+// Returns country, state, a slice of strings with potential abbreviations 
+// (based on size; 2 or 3 characters), and then a slice of the remaning pieces.
+// This does a good job at separating things that are clearly abbreviations 
+// from the city so that searching is faster and more accuarate.
 func (g *GeoBed) extractLocationPieces(n string) (string, string, []string, []string) {
 	var re = regexp.MustCompile("")
 
@@ -797,7 +880,8 @@ func (g *GeoBed) extractLocationPieces(n string) (string, string, []string, []st
 	re = regexp.MustCompile(`[\S]{2,3}`)
 	abbrevSlice := re.FindStringSubmatch(n)
 
-	// Convert country to country code and pull it out. We'll use it as a secondary form of validation. Remove the code from the original query.
+	// Convert country to country code and pull it out. We'll use it as a 
+	// secondary form of validation. Remove the code from the original query.
 	nCo := ""
 	for _, co := range g.co {
 		re = regexp.MustCompile("(?i)^" + co.Country + ",?\\s|\\s" + co.Country + ",?\\s" + co.Country + "\\s$")
@@ -808,7 +892,8 @@ func (g *GeoBed) extractLocationPieces(n string) (string, string, []string, []st
 		}
 	}
 
-	// Find US State codes and pull them out as well (do not convert state names, they can also easily be city names).
+	// Find US State codes and pull them out as well (do not convert 
+	// state names, they can also easily be city names).
 	nSt := ""
 	for sc, _ := range UsSateCodes {
 		re = regexp.MustCompile("(?i)^" + sc + ",?\\s|\\s" + sc + ",?\\s|\\s" + sc + "$")
@@ -821,18 +906,27 @@ func (g *GeoBed) extractLocationPieces(n string) (string, string, []string, []st
 	// Trim spaces and commas off the modified string.
 	n = strings.Trim(n, " ,")
 
-	// Now extract words (potential city names) into a slice. With this, the index will be referenced to pinpoint sections of the g.c []GeobedCity slice to scan.
-	// This results in a much faster lookup. This is over a simple binary search with strings.Search() etc. because the city name may not be the first word.
+	// Now extract words (potential city names) into a slice. With this,
+	//  the index will be referenced to pinpoint sections of 
+	// the g.c []GeobedCity slice to scan.
+	// This results in a much faster lookup. This is over a simple 
+	// binary search with strings.Search() etc. because the city name 
+	// may not be the first word.
 	// This should not contain any known country code or US state codes.
 	nSlice := strings.Split(n, " ")
 
 	return nCo, nSt, abbrevSlice, nSlice
 }
 
-// There's potentially 2.7 million items to range though, let's see if we can reduce that by taking slices of the slice in alphabetical order.
+// There's potentially 2.7 million items to range though, let's see if we can 
+// reduce that by taking slices of the slice in alphabetical order.
 func (g *GeoBed) getSearchRange(nSlice []string) []r {
-	// NOTE: A simple binary search was not helping here since we aren't looking for one specific thing. We have multiple elements, city, state, country.
-	// So we'd end up with multiple binary searches to piece together which could be quite a few exponentially given the possible combinations...And so it was slower.
+	// NOTE: A simple binary search was not helping here since
+	// we aren't looking for one specific thing.
+	// We have multiple elements, city, state, country.
+	// So we'd end up with multiple binary searches to piece together which
+	//  could be quite a few exponentially given the possible
+	// combinations...And so it was slower.
 
 	ranges := []r{}
 	for _, ns := range nSlice {
@@ -841,7 +935,8 @@ func (g *GeoBed) getSearchRange(nSlice []string) []r {
 		if len(ns) > 0 {
 			// Get the first character in the string, this tells us where to stop.
 			fc := toLower(string(ns[0]))
-			// Get the previous index key (by getting the previous character in the alphabet) to figure out where to start.
+			// Get the previous index key (by getting the previous 
+			// character in the alphabet) to figure out where to start.
 			pik := string(prev(rune(fc[0])))
 
 			// To/from key
@@ -878,8 +973,10 @@ func (g *GeoBed) ReverseGeocode(lat float64, lng float64) GeobedCity {
 		return c
 	}
 
-	// Note: All geohashes are going to be 12 characters long. Even if the precision on the lat/lng isn't great. The geohash package will center things.
-	// Obviously lat/lng like 37, -122 is a guess. That's no where near the resolution of a city. Though we're going to allow guesses.
+	// Note: All geohashes are going to be 12 characters long. Even if the 
+	// precision on the lat/lng isn't great. The geohash package will center things.
+	// Obviously lat/lng like 37, -122 is a guess. That's no where near
+	// the resolution of a city. Though we're going to allow guesses.
 	mostMatched := 0
 	matched := 0
 	for k, v := range g.c {
@@ -892,7 +989,8 @@ func (g *GeoBed) ReverseGeocode(lat float64, lng float64) GeobedCity {
 					matched++
 				}
 			}
-			// tie breakers go to city with larger population (NOTE: There's still a chance that the next pass will uncover a better match)
+			// tie breakers go to city with larger population (NOTE: There's
+			//  still a chance that the next pass will uncover a better match)
 			if matched == mostMatched && g.c[k].Population > c.Population {
 				c = g.c[k]
 				// log.Println("MATCHES")
@@ -938,7 +1036,9 @@ func toUpper(s string) string {
 	return string(b)
 }
 
-// Dumps the Geobed data to disk. This speeds up startup time on subsequent runs (or if calling NewGeobed() multiple times which should be avoided if possible).
+// Dumps the Geobed data to disk. This speeds up startup time on subsequent
+// runs (or if calling NewGeobed() multiple times which should be avoided
+// if possible).
 // TODO: Refactor
 func (g GeoBed) store() error {
 	b := new(bytes.Buffer)

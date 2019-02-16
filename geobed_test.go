@@ -1,8 +1,9 @@
 package geobed
 
 import (
-	. "gopkg.in/check.v1"
 	"testing"
+
+	. "gopkg.in/check.v1"
 )
 
 // Hook up gocheck into the "go test" runner.
@@ -17,8 +18,10 @@ var _ = Suite(&GeobedSuite{})
 var g GeoBed
 
 func (s *GeobedSuite) SetUpSuite(c *C) {
-	// This is a common alternate name. However, there's a city called "Apple" (at least one). So it's a bit difficult.
-	// Plus many people would put "The Big Apple" ... Yet Geonames alt city names has just "Big Apple" ... It may be worth trying to improve this though.
+	// This is a common alternate name. However, there's a city called "Apple"
+	// (at least one). So it's a bit difficult.
+	// Plus many people would put "The Big Apple" ... Yet Geonames alt city
+	// names has just "Big Apple" ... It may be worth trying to improve this though.
 	//s.testLocations = append(s.testLocations, map[string]string{"query": "Big Apple", "city": "New York City", "country": "US", "region": "NY"})
 
 	//s.testLocations = append(s.testLocations, map[string]string{"query": "NYC", "city": "New York City", "country": "US", "region": "NY"})
@@ -63,8 +66,10 @@ func (s *GeobedSuite) TestGeocode(c *C) {
 		r := g.Geocode(v["query"])
 		c.Assert(r.City, Equals, v["city"])
 		c.Assert(r.Country, Equals, v["country"])
-		// Due to all the data and various sets, the region can be a little weird. It's intended to be US state first and foremost (where it is most helpful in geocoding).
-		// TODO: Look back into this later and try to make sense of it all. It may end up needing to be multiple fields (which will further complicate the matching).
+		// Due to all the data and various sets, the region can be a little weird.
+		// It's intended to be US state first and foremost (where it is most helpful in geocoding).
+		// TODO: Look back into this later and try to make sense of it all.
+		// It may end up needing to be multiple fields (which will further complicate the matching).
 		if v["region"] != "" {
 			c.Assert(r.Region, Equals, v["region"])
 		}
@@ -118,7 +123,8 @@ func (s *GeobedSuite) TestToLower(c *C) {
 // 5629888699 ns/op
 // 5336288337 ns/op
 // 5473618388 ns/op
-// This takes about 5 seconds (to load the data sets into memory - should only happen once per application, ideally one would do this up front)
+// This takes about 5 seconds (to load the data sets into memory -
+// should only happen once per application, ideally one would do this up front)
 func BenchmarkNewGeobed(b *testing.B) {
 	g = NewGeobed()
 }
@@ -128,7 +134,8 @@ func BenchmarkNewGeobed(b *testing.B) {
 // 2214503806 ns/op
 // 2265304148 ns/op
 // 2186608767 ns/op
-// This has been scoring around 2 - 2.4 seconds on my MacbookPro Retina with 8GB of RAM (before concurrency was added)
+// This has been scoring around 2 - 2.4 seconds on
+// MacbookPro Retina with 8GB of RAM (before concurrency was added)
 // (20) 98841134 ns/op
 func BenchmarkReverseGeocode(b *testing.B) {
 	for n := 0; n < b.N; n++ {
@@ -143,12 +150,15 @@ func BenchmarkReverseGeocode(b *testing.B) {
 // 2956824815 ns/op
 // 2861628023 ns/op
 //
-// After using the index and ranging over sections of the slice, it takes about 0.0175 - 0.02 seconds per lookup!
+// After using the index and ranging over sections of the slice,
+// it takes about 0.0175 - 0.02 seconds per lookup!
 // (10) 175591906 ns/op
 // (10) 180395494 ns/op
 // (10) 123880439 ns/op
 // (10) 124857396 ns/op
-// (10) 164229982 ns/op (for Austin, TX) - speed can change a tiny bit based on what's being searched and where it is in the index, how items that start with the same characters, etc.
+// (10) 164229982 ns/op (for Austin, TX) - speed can change
+// a tiny bit based on what's being searched and where it is in the index,
+// how items that start with the same characters, etc.
 // (10) 135527499 ns/op
 func BenchmarkGeocode(b *testing.B) {
 
