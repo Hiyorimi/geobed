@@ -1,7 +1,10 @@
 Geobed
 ============
 
-[![Build Status](https://drone.io/github.com/SocialHarvest/geobed/status.png)](https://drone.io/github.com/SocialHarvest/geobed/latest) [![Coverage Status](https://coveralls.io/repos/SocialHarvest/geobed/badge.png)](https://coveralls.io/r/SocialHarvest/geobed)
+
+[![GoDoc Reference](http://img.shields.io/badge/godoc-reference-5272B4.svg?style=flat-square)](http://godoc.org/github.com/Hiyorimi/geobed)
+[![Coverage Status](https://coveralls.io/repos/github/Hiyorimi/geobed/badge.svg?branch=master)](https://coveralls.io/github/Hiyorimi/geobed?branch=master)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Hiyorimi/geobed?style=flat-square)](https://goreportcard.com/report/github.com/Hiyorimi/geobed)
 
 This Golang package contains an embedded geocoder. There are no major external dependendies other than some downloaded data files. Once downloaded, those data files 
 are stored in memory. So after the initial load there truly are no outside dependencies. It geocodes and reverse geocodes to a city level detail. It approximates and takes 
