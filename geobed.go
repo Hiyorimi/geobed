@@ -49,7 +49,7 @@ var dataSetFiles = []map[string]string{
 		"path": "./geobed-data/cities1000.zip", "id": "geonamesCities1000"},
 	{"url": "http://download.geonames.org/export/dump/countryInfo.txt",
 		"path": "./geobed-data/countryInfo.txt", "id": "geonamesCountryInfo"},
-	{"url": "http://download.maxmind.com/download/worldcities/worldcitiespop.txt.gz",
+	{"url": "https://github.com/CODAIT/redrock/raw/master/twitter-decahose/src/main/resources/Location/worldcitiespop.txt.gz",
 		"path": "./geobed-data/worldcitiespop.txt.gz", "id": "maxmindWorldCities"},
 	//{"url": "http://geolite.maxmind.com/download/geoip/database/GeoLiteCity_CSV/GeoLiteCity-latest.zip",
 	//"path": "./geobed-data/GeoLiteCity-latest.zip", "id": "maxmindLiteCity"},
@@ -229,6 +229,7 @@ func NewGeobed() GeoBed {
 	g.co, err = loadGeobedCountryData()
 	err = loadGeobedCityNameIdx()
 	if err != nil || len(g.c) == 0 {
+		log.Println("Got err", err, "loading data into memory. Will try to download now.")
 		g.downloadDataSets()
 		g.loadDataSets()
 		g.store()
@@ -249,11 +250,16 @@ func (g *GeoBed) downloadDataSets() {
 				defer out.Close()
 				if oErr == nil {
 					r, rErr := http.Get(f["url"])
+					if r.StatusCode == 404 {
+						log.Println("Got 404 downloading ", f["url"], "file. Try placing it in", f["path"],
+							"manually.")
+						return
+					}
 					if rErr == nil {
 						_, nErr := io.Copy(out, r.Body)
 						if nErr != nil {
-							// log.Println("Failed to copy data file, it will be tried again
-							//  on next application start.")
+							log.Println("Failed to copy data file, it will be tried again" +
+								"on next application start.")
 							// remove file so another attempt can be made, should something fail
 							err = os.Remove(f["path"])
 						}
@@ -546,6 +552,7 @@ func (g *GeoBed) loadDataSets() {
 }
 
 // Geocode forward geocode, location string to lat/lng (returns a struct though).
+// Calls exactMatchCity / fuzzyMatchLocation to perform a search.
 func (g *GeoBed) Geocode(n string, opts ...GeocodeOptions) GeobedCity {
 	var c GeobedCity
 	n = strings.TrimSpace(n)
@@ -995,12 +1002,12 @@ func (g *GeoBed) ReverseGeocode(lat float64, lng float64) GeobedCity {
 			//  still a chance that the next pass will uncover a better match)
 			if matched == mostMatched && g.c[k].Population > c.Population {
 				c = g.c[k]
-				// log.Println("MATCHES")
-				// log.Println(matched)
-				// log.Println("CITY")
-				// log.Println(c.City)
-				// log.Println("POPULATION")
-				// log.Println(c.Population)
+				//log.Println("MATCHES")
+				//log.Println(matched)
+				//log.Println("CITY")
+				//log.Println(c.City)
+				//log.Println("POPULATION")
+				//log.Println(c.Population)
 			}
 			if matched > mostMatched {
 				c = g.c[k]

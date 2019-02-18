@@ -1,6 +1,8 @@
 package geobed
 
 import (
+	"github.com/mmcloughlin/geohash"
+	"github.com/stretchr/testify/assert"
 	"testing"
 
 	. "gopkg.in/check.v1"
@@ -59,6 +61,105 @@ func (s *GeobedSuite) TestANewGeobed(c *C) {
 	c.Assert(g.c, FitsTypeOf, []GeobedCity(nil))
 	c.Assert(g.co, FitsTypeOf, []CountryInfo(nil))
 	c.Assert(cityNameIdx, FitsTypeOf, make(map[string]int))
+}
+
+func TestExactMatchCity (t *testing.T) {
+	var geoBedTest GeoBed
+	var city, result GeobedCity
+	var country CountryInfo
+
+	result = geoBedTest.exactMatchCity("")
+	assert.Equal(t, GeobedCity{}, result)
+
+	city = GeobedCity{
+		"Testcity",
+		"Testing city",
+		"Testcountry",
+		"Testregion",
+		 42.42,
+		42.42,
+		int32(1000),
+		geohash.Encode(city.Latitude, city.Longitude),
+	}
+	country = CountryInfo{
+		"Testcountry",
+		"Testcity",
+		1000,
+		10000,
+		1,
+		1,
+		"te",
+		"tes",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+	}
+	geoBedTest.c = append(geoBedTest.c, city)
+	geoBedTest.co = append(geoBedTest.co, country)
+
+	result = geoBedTest.exactMatchCity("")
+	assert.Equal(t, GeobedCity{}, result)
+
+	result = g.exactMatchCity("NotMatchingQuery")
+	assert.Equal(t, GeobedCity{}, result)
+}
+
+func TestFuzzyMatchLocation (t *testing.T) {
+	var geoBedTest GeoBed
+	var city, result GeobedCity
+	var country CountryInfo
+
+
+	city = GeobedCity{
+		"Testcity",
+		"Testing city",
+		"Testcountry",
+		"Testregion",
+		42.42,
+		42.42,
+		int32(1000),
+		geohash.Encode(city.Latitude, city.Longitude),
+	}
+	country = CountryInfo{
+		"Testcountry",
+		"Testcity",
+		1000,
+		10000,
+		1,
+		1,
+		"te",
+		"tes",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+	}
+	geoBedTest.c = append(geoBedTest.c, city)
+	geoBedTest.co = append(geoBedTest.co, country)
+
+	result = geoBedTest.fuzzyMatchLocation("")
+	assert.Equal(t, city, result)
+
+	result = g.fuzzyMatchLocation("Moscow")
+	assert.Equal(t, "Moscow", result.City)
+	assert.Equal(t, "RU", result.Country)
+	assert.InDelta(t, 55.75, result.Latitude, 0.2)
+	assert.InDelta(t, 37.61, result.Longitude, 0.2)
 }
 
 func (s *GeobedSuite) TestGeocode(c *C) {
