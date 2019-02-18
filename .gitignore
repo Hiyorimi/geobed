@@ -4,3 +4,4 @@ coverage.out
 cover.sh
 .vscode/
 .idea/
+.coveralls.yml

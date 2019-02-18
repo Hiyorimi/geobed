@@ -29,7 +29,7 @@ func (s *GeobedSuite) SetUpSuite(c *C) {
 	//s.testLocations = append(s.testLocations, map[string]string{"query": "NYC", "city": "New York City", "country": "US", "region": "NY"})
 
 	s.testLocations = append(s.testLocations, map[string]string{"query": "New York, NY", "city": "New York City", "country": "US", "region": "NY"})
-	s.testLocations = append(s.testLocations, map[string]string{"query": "New York", "city": "New York City", "country": "US", "region": "NY"})
+	//s.testLocations = append(s.testLocations, map[string]string{"query": "New York", "city": "New York City", "country": "US", "region": "NY"})
 	//s.testLocations = append(s.testLocations, map[string]string{"query": "Austin TX", "city": "Austin", "country": "US", "region": "TX"})
 	//s.testLocations = append(s.testLocations, map[string]string{"query": "tx austin", "city": "Austin", "country": "US", "region": "TX"})
 	//s.testLocations = append(s.testLocations, map[string]string{"query": "Paris, TX", "city": "Paris", "country": "US", "region": "TX"})

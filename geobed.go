@@ -226,7 +226,13 @@ func NewGeobed() GeoBed {
 
 	var err error
 	g.c, err = loadGeobedCityData()
+	if err != nil {
+		log.Println("Got err", err, "loading GeobedCity Data into memory.")
+	}
 	g.co, err = loadGeobedCountryData()
+	if err != nil {
+		log.Println("Got err", err, "loading GeobedCountry Data into memory.")
+	}
 	err = loadGeobedCityNameIdx()
 	if err != nil || len(g.c) == 0 {
 		log.Println("Got err", err, "loading data into memory. Will try to download now.")
@@ -262,6 +268,9 @@ func (g *GeoBed) downloadDataSets() {
 								"on next application start.")
 							// remove file so another attempt can be made, should something fail
 							err = os.Remove(f["path"])
+							if err != nil {
+								log.Println("Encountered an error on file deletion:", err)
+							}
 						}
 						r.Body.Close()
 					}
@@ -673,7 +682,7 @@ func (g *GeoBed) exactMatchCity(n string) GeobedCity {
 // When geocoding, this provides a scored best match.
 func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
 	nCo, nSt, abbrevSlice, nSlice := g.extractLocationPieces(n)
-	// Take the reamining unclassified pieces (those not likely to be
+	// Take the renaming unclassified pieces (those not likely to be
 	// abbreviations) and get our search range.
 	// These pieces are likely contain the city name. Narrowing down
 	// the search range will make the lookup faster.
@@ -795,7 +804,7 @@ func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
 			for _, ns := range nSlice {
 				ns = strings.TrimSuffix(ns, ",")
 
-				// City (worth 2 points if contians part of string)
+				// City (worth 2 points if contains part of string)
 				if strings.Contains(toLower(v.City), toLower(ns)) {
 					if val, ok := bestMatchingKeys[currentKey]; ok {
 						bestMatchingKeys[currentKey] = val + 2
