@@ -284,248 +284,7 @@ func (g *GeoBed) downloadDataSets() {
 	}
 }
 
-// Unzips the data sets and loads the data.
-func (g *GeoBed) loadDataSets() {
-	locationDedupeIdx = make(map[string]bool)
-
-	for _, f := range dataSetFiles {
-		// This one is zipped
-		if f["id"] == "geonamesCities1000" {
-			rz, err := zip.OpenReader(f["path"])
-			if err != nil {
-				log.Fatal(err)
-			}
-			defer rz.Close()
-
-			for _, uF := range rz.File {
-				fi, err := uF.Open()
-
-				if err != nil {
-					log.Fatal(err)
-				}
-				defer fi.Close()
-
-				// Geonames uses a tab delineated format and it's not even
-				// consistent. No CSV reader that I've found for Go can understand this.
-				// I'm not expecting any reader to either because it's an
-				// invalid CSV to be frank. However, we can still split up each row by \t
-				scanner := bufio.NewScanner(fi)
-				scanner.Split(bufio.ScanLines)
-
-				i := 1
-				for scanner.Scan() {
-					i++
-
-					// So regexp, sadly, must be used (well, unless I wanted parse
-					//  each string byte by byte, pushing each into a buffer to
-					// append to a slice until a tab is reached, etc.).
-					// But I'd have to also then put in a condition if the next
-					// byte was a \t rune, then append an empty string, etc. This
-					//  just, for now, seems nicer (easier).
-					// This is only an import/update, so it shouldn't be an issue
-					//  for performance. If it is, then I'll look into other solutions.
-					fields := regexp.MustCompile("\t").Split(scanner.Text(), 19)
-
-					// NOTE: Now using a combined GeobedCity struct since not all
-					// data sets have the same fields.
-					// Plus, the entire point was to geocode forward and reverse.
-					//  Bonus information like elevation and such is just superfluous.
-					// Leaving it here because it may be configurable... If options
-					//  are passed to NewGeobed() then maybe Geobed can simply be a Geonames search.
-					// Don't even load in MaxMind data...And if that's the case,
-					//  maybe that bonus information is desired.
-					if len(fields) == 19 {
-						//id, _ := strconv.Atoi(fields[0])
-						lat, _ := strconv.ParseFloat(fields[4], 64)
-						lng, _ := strconv.ParseFloat(fields[5], 64)
-						pop, _ := strconv.Atoi(fields[14])
-						//elv, _ := strconv.Atoi(fields[15])
-						//dem, _ := strconv.Atoi(fields[16])
-
-						gh := geohash.Encode(lat, lng)
-						// This is produced with empty lat/lng values - don't store it.
-						if gh == "7zzzzzzzzzzz" {
-							gh = ""
-						}
-
-						var c GeobedCity
-						c.City = strings.Trim(string(fields[1]), " ")
-						c.CityAlt = string(fields[3])
-						c.Country = string(fields[8])
-						c.Region = string(fields[10])
-						c.Latitude = lat
-						c.Longitude = lng
-						c.Population = int32(pop)
-						c.Geohash = gh
-
-						// Don't include entries without a city name. If we want to
-						// geocode the centers of countries and states, then we can
-						// do that faster through other means.
-						if len(c.City) > 0 {
-							g.c = append(g.c, c)
-						}
-					}
-				}
-			}
-		}
-
-		// ...And this one is Gzipped (and this one may have worked with the CSV
-		// package, but parse it the same way as the others line by line)
-		if f["id"] == "maxmindWorldCities" {
-			// It also has a lot of dupes
-			maxMindCityDedupeIdx = make(map[string][]string)
-
-			fi, err := os.Open(f["path"])
-			if err != nil {
-				log.Println(err)
-			}
-			defer fi.Close()
-
-			fz, err := gzip.NewReader(fi)
-			if err != nil {
-				log.Println(err)
-			}
-			defer fz.Close()
-
-			scanner := bufio.NewScanner(fz)
-			scanner.Split(bufio.ScanLines)
-
-			i := 1
-			for scanner.Scan() {
-				i++
-				t := scanner.Text()
-
-				fields := strings.Split(t, ",")
-				if len(fields) == 7 {
-					var b bytes.Buffer
-					b.WriteString(fields[0]) // country
-					b.WriteString(fields[3]) // region
-					b.WriteString(fields[1]) // city
-
-					idx := b.String()
-					b.Reset()
-					maxMindCityDedupeIdx[idx] = fields
-				}
-			}
-
-			// Loop the map of fields after dupes have been removed (about 1/5th
-			// less... 2.6m vs 3.1m inreases lookup performance).
-			for _, fields := range maxMindCityDedupeIdx {
-				if fields[0] != "" && fields[0] != "0" {
-					if fields[2] != "AccentCity" {
-						pop, _ := strconv.Atoi(fields[4])
-						lat, _ := strconv.ParseFloat(fields[5], 64)
-						lng, _ := strconv.ParseFloat(fields[6], 64)
-						// MaxMind's data set is a bit dirty. I've seen city names
-						// surrounded by parenthesis in a few places.
-						cn := strings.Trim(string(fields[2]), " ")
-						cn = strings.Trim(cn, "( )")
-
-						// Don't take any city names with erroneous punctuation either.
-						if strings.Contains(cn, "!") || strings.Contains(cn, "@") {
-							continue
-						}
-
-						gh := geohash.Encode(lat, lng)
-						// This is produced with empty lat/lng values - don't store it.
-						if gh == "7zzzzzzzzzzz" {
-							gh = ""
-						}
-
-						// If the geohash was seen before...
-						_, ok := locationDedupeIdx[gh]
-						if !ok {
-							locationDedupeIdx[gh] = true
-
-							var c GeobedCity
-							c.City = cn
-							c.Country = toUpper(string(fields[0]))
-							c.Region = string(fields[3])
-							c.Latitude = lat
-							c.Longitude = lng
-							c.Population = int32(pop)
-							c.Geohash = gh
-
-							// Don't include entries without a city name. If we want
-							// to geocode the centers of countries and states, then
-							// we can do that faster through other means.
-							if len(c.City) > 0 && len(c.Country) > 0 {
-								g.c = append(g.c, c)
-							}
-						}
-					}
-				}
-			}
-			// Clear out the temrporary index (set to nil, it does get re-created)
-			// so that Go can garbage collect it at some point whenever it feels the need.
-			maxMindCityDedupeIdx = nil
-			locationDedupeIdx = nil
-		}
-
-		// ...And this one is just plain text
-		if f["id"] == "geonamesCountryInfo" {
-			fi, err := os.Open(f["path"])
-
-			if err != nil {
-				log.Fatal(err)
-			}
-			defer fi.Close()
-
-			scanner := bufio.NewScanner(fi)
-			scanner.Split(bufio.ScanLines)
-
-			i := 1
-			for scanner.Scan() {
-				t := scanner.Text()
-				// There are a bunch of lines in this file that are comments, they start with #
-				if string(t[0]) != "#" {
-					i++
-					fields := regexp.MustCompile("\t").Split(t, 19)
-
-					if len(fields) == 19 {
-						if fields[0] != "" && fields[0] != "0" {
-							isoNumeric, _ := strconv.Atoi(fields[2])
-							area, _ := strconv.Atoi(fields[6])
-							pop, _ := strconv.Atoi(fields[7])
-							gid, _ := strconv.Atoi(fields[16])
-
-							var ci CountryInfo
-							ci.ISO = string(fields[0])
-							ci.ISO3 = string(fields[1])
-							ci.ISONumeric = int16(isoNumeric)
-							ci.Fips = string(fields[3])
-							ci.Country = string(fields[4])
-							ci.Capital = string(fields[5])
-							ci.Area = int32(area)
-							ci.Population = int32(pop)
-							ci.Continent = string(fields[8])
-							ci.Tld = string(fields[9])
-							ci.CurrencyCode = string(fields[10])
-							ci.CurrencyName = string(fields[11])
-							ci.Phone = string(fields[12])
-							ci.PostalCodeFormat = string(fields[13])
-							ci.PostalCodeRegex = string(fields[14])
-							ci.Languages = string(fields[15])
-							ci.GeonameID = int32(gid)
-							ci.Neighbours = string(fields[17])
-							ci.EquivalentFipsCode = string(fields[18])
-
-							g.co = append(g.co, ci)
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Sort []GeobedCity by city names to help with binary search (the City field is the
-	// most searched upon field and the matching names can be easily filtered down from there).
-	sort.Sort(g.c)
-
-	//debug
-	//log.Println("TOTAL RECORDS:")
-	//log.Println(len(g.c))
-
+func (g *GeoBed) createCityNamesLocationsIndex() {
 	// Index the locations of city names in the g.c []GeoCity slice. This way when
 	// searching the range can be limited so it will be faster.
 	cityNameIdx = make(map[string]int)
@@ -560,6 +319,263 @@ func (g *GeoBed) loadDataSets() {
 	}
 }
 
+func (g *GeoBed) loadGeonamesCities1000(f map[string]string) {
+	rz, err := zip.OpenReader(f["path"])
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rz.Close()
+
+	for _, uF := range rz.File {
+		fi, err := uF.Open()
+
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer fi.Close()
+
+		// Geonames uses a tab delineated format and it's not even
+		// consistent. No CSV reader that I've found for Go can understand this.
+		// I'm not expecting any reader to either because it's an
+		// invalid CSV to be frank. However, we can still split up each row by \t
+		scanner := bufio.NewScanner(fi)
+		scanner.Split(bufio.ScanLines)
+
+		i := 1
+		for scanner.Scan() {
+			i++
+
+			// So regexp, sadly, must be used (well, unless I wanted parse
+			//  each string byte by byte, pushing each into a buffer to
+			// append to a slice until a tab is reached, etc.).
+			// But I'd have to also then put in a condition if the next
+			// byte was a \t rune, then append an empty string, etc. This
+			//  just, for now, seems nicer (easier).
+			// This is only an import/update, so it shouldn't be an issue
+			//  for performance. If it is, then I'll look into other solutions.
+			fields := regexp.MustCompile("\t").Split(scanner.Text(), 19)
+
+			// NOTE: Now using a combined GeobedCity struct since not all
+			// data sets have the same fields.
+			// Plus, the entire point was to geocode forward and reverse.
+			//  Bonus information like elevation and such is just superfluous.
+			// Leaving it here because it may be configurable... If options
+			//  are passed to NewGeobed() then maybe Geobed can simply be a Geonames search.
+			// Don't even load in MaxMind data...And if that's the case,
+			//  maybe that bonus information is desired.
+			if len(fields) == 19 {
+				//id, _ := strconv.Atoi(fields[0])
+				lat, _ := strconv.ParseFloat(fields[4], 64)
+				lng, _ := strconv.ParseFloat(fields[5], 64)
+				pop, _ := strconv.Atoi(fields[14])
+				//elv, _ := strconv.Atoi(fields[15])
+				//dem, _ := strconv.Atoi(fields[16])
+
+				gh := geohash.Encode(lat, lng)
+				// This is produced with empty lat/lng values - don't store it.
+				if gh == "7zzzzzzzzzzz" {
+					gh = ""
+				}
+
+				var c GeobedCity
+				c.City = strings.Trim(string(fields[1]), " ")
+				c.CityAlt = string(fields[3])
+				c.Country = string(fields[8])
+				c.Region = string(fields[10])
+				c.Latitude = lat
+				c.Longitude = lng
+				c.Population = int32(pop)
+				c.Geohash = gh
+
+				// Don't include entries without a city name. If we want to
+				// geocode the centers of countries and states, then we can
+				// do that faster through other means.
+				if len(c.City) > 0 {
+					g.c = append(g.c, c)
+				}
+			}
+		}
+	}
+}
+
+func (g *GeoBed) loadMaxmindWorldCities(f map[string]string) {
+	// It also has a lot of dupes
+	maxMindCityDedupeIdx = make(map[string][]string)
+
+	fi, err := os.Open(f["path"])
+	if err != nil {
+		log.Println(err)
+	}
+	defer fi.Close()
+
+	fz, err := gzip.NewReader(fi)
+	if err != nil {
+		log.Println(err)
+	}
+	defer fz.Close()
+
+	scanner := bufio.NewScanner(fz)
+	scanner.Split(bufio.ScanLines)
+
+	i := 1
+	for scanner.Scan() {
+		i++
+		t := scanner.Text()
+
+		fields := strings.Split(t, ",")
+		if len(fields) == 7 {
+			var b bytes.Buffer
+			b.WriteString(fields[0]) // country
+			b.WriteString(fields[3]) // region
+			b.WriteString(fields[1]) // city
+
+			idx := b.String()
+			b.Reset()
+			maxMindCityDedupeIdx[idx] = fields
+		}
+	}
+
+	// Loop the map of fields after dupes have been removed (about 1/5th
+	// less... 2.6m vs 3.1m inreases lookup performance).
+	for _, fields := range maxMindCityDedupeIdx {
+		if fields[0] != "" && fields[0] != "0" {
+			if fields[2] != "AccentCity" {
+				pop, _ := strconv.Atoi(fields[4])
+				lat, _ := strconv.ParseFloat(fields[5], 64)
+				lng, _ := strconv.ParseFloat(fields[6], 64)
+				// MaxMind's data set is a bit dirty. I've seen city names
+				// surrounded by parenthesis in a few places.
+				cn := strings.Trim(string(fields[2]), " ")
+				cn = strings.Trim(cn, "( )")
+
+				// Don't take any city names with erroneous punctuation either.
+				if strings.Contains(cn, "!") || strings.Contains(cn, "@") {
+					continue
+				}
+
+				gh := geohash.Encode(lat, lng)
+				// This is produced with empty lat/lng values - don't store it.
+				if gh == "7zzzzzzzzzzz" {
+					gh = ""
+				}
+
+				// If the geohash was seen before...
+				_, ok := locationDedupeIdx[gh]
+				if !ok {
+					locationDedupeIdx[gh] = true
+
+					var c GeobedCity
+					c.City = cn
+					c.Country = toUpper(string(fields[0]))
+					c.Region = string(fields[3])
+					c.Latitude = lat
+					c.Longitude = lng
+					c.Population = int32(pop)
+					c.Geohash = gh
+
+					// Don't include entries without a city name. If we want
+					// to geocode the centers of countries and states, then
+					// we can do that faster through other means.
+					if len(c.City) > 0 && len(c.Country) > 0 {
+						g.c = append(g.c, c)
+					}
+				}
+			}
+		}
+	}
+	// Clear out the temrporary index (set to nil, it does get re-created)
+	// so that Go can garbage collect it at some point whenever it feels the need.
+	maxMindCityDedupeIdx = nil
+	locationDedupeIdx = nil
+}
+
+func (g *GeoBed) loadGeonamesCountryInfo(f map[string]string) {
+	fi, err := os.Open(f["path"])
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer fi.Close()
+
+	scanner := bufio.NewScanner(fi)
+	scanner.Split(bufio.ScanLines)
+
+	i := 1
+	for scanner.Scan() {
+		t := scanner.Text()
+		// There are a bunch of lines in this file that are comments, they start with #
+		if string(t[0]) != "#" {
+			i++
+			fields := regexp.MustCompile("\t").Split(t, 19)
+
+			if len(fields) == 19 {
+				if fields[0] != "" && fields[0] != "0" {
+					isoNumeric, _ := strconv.Atoi(fields[2])
+					area, _ := strconv.Atoi(fields[6])
+					pop, _ := strconv.Atoi(fields[7])
+					gid, _ := strconv.Atoi(fields[16])
+
+					var ci CountryInfo
+					ci.ISO = string(fields[0])
+					ci.ISO3 = string(fields[1])
+					ci.ISONumeric = int16(isoNumeric)
+					ci.Fips = string(fields[3])
+					ci.Country = string(fields[4])
+					ci.Capital = string(fields[5])
+					ci.Area = int32(area)
+					ci.Population = int32(pop)
+					ci.Continent = string(fields[8])
+					ci.Tld = string(fields[9])
+					ci.CurrencyCode = string(fields[10])
+					ci.CurrencyName = string(fields[11])
+					ci.Phone = string(fields[12])
+					ci.PostalCodeFormat = string(fields[13])
+					ci.PostalCodeRegex = string(fields[14])
+					ci.Languages = string(fields[15])
+					ci.GeonameID = int32(gid)
+					ci.Neighbours = string(fields[17])
+					ci.EquivalentFipsCode = string(fields[18])
+
+					g.co = append(g.co, ci)
+				}
+			}
+		}
+	}
+}
+
+// Unzips the data sets and loads the data.
+func (g *GeoBed) loadDataSets() {
+	locationDedupeIdx = make(map[string]bool)
+
+	for _, f := range dataSetFiles {
+		// This one is zipped
+		if f["id"] == "geonamesCities1000" {
+			g.loadGeonamesCities1000(f)
+		}
+
+		// ...And this one is Gzipped (and this one may have worked with the CSV
+		// package, but parse it the same way as the others line by line)
+		if f["id"] == "maxmindWorldCities" {
+			g.loadMaxmindWorldCities(f)
+		}
+
+		// ...And this one is just plain text
+		if f["id"] == "geonamesCountryInfo" {
+			g.loadGeonamesCountryInfo(f)
+		}
+	}
+
+	// Sort []GeobedCity by city names to help with binary search (the City field is the
+	// most searched upon field and the matching names can be easily filtered down from there).
+	sort.Sort(g.c)
+
+	//debug
+	//log.Println("TOTAL RECORDS:")
+	//log.Println(len(g.c))
+
+	g.createCityNamesLocationsIndex()
+}
+
 // Geocode forward geocode, location string to lat/lng (returns a struct though).
 // Calls exactMatchCity / fuzzyMatchLocation to perform a search.
 func (g *GeoBed) Geocode(n string, opts ...GeocodeOptions) GeobedCity {
@@ -586,6 +602,53 @@ func (g *GeoBed) Geocode(n string, opts ...GeocodeOptions) GeobedCity {
 		c = g.fuzzyMatchLocation(n)
 	}
 
+	return c
+}
+
+func filterMatchingCities(nCo, nSt string, matchingCities []GeobedCity) GeobedCity {
+	var c GeobedCity
+	// Then range over those matching cities and try to figure out which
+	// one it is - city names are unfortunately not unique of course.
+	// There shouldn't be very many so I don't mind the multiple loops.
+	for _, city := range matchingCities {
+		// Was the state abbreviation present? That sounds promising.
+		if strings.EqualFold(nSt, city.Region) {
+			c = city
+		}
+	}
+
+	for _, city := range matchingCities {
+		// Matches the state and country? Likely the best scenario,
+		// I'd call it the best match.
+		if strings.EqualFold(nSt, city.Region) && strings.EqualFold(nCo, city.Country) {
+			c = city
+		}
+	}
+
+	// If we still don't have a city, maybe we have a country with the
+	// city name, ie. "New York, USA"
+	// This is tougher because there's a "New York" in Florida, Kentucky,
+	// and more. Let's use population to assist if we can.
+	if c.City == "" {
+		matchingCountryCities := []GeobedCity{}
+		for _, city := range matchingCities {
+			if strings.EqualFold(nCo, city.Country) {
+				matchingCountryCities = append(matchingCountryCities, city)
+			}
+		}
+
+		// If someone says, "New York, USA" they most likely mean
+		// New York, NY because it's the largest city.
+		// Specific locations are often implied based on size or
+		// popularity even though the names aren't unique.
+		biggestCity := GeobedCity{}
+		for _, city := range matchingCountryCities {
+			if city.Population > biggestCity.Population {
+				biggestCity = city
+			}
+		}
+		c = biggestCity
+	}
 	return c
 }
 
@@ -632,64 +695,127 @@ func (g *GeoBed) exactMatchCity(n string) GeobedCity {
 		return matchingCities[0]
 		// If more than one was found, we need to guess.
 	} else if len(matchingCities) > 1 {
-		// Then range over those matching cities and try to figure out which
-		// one it is - city names are unfortunately not unique of course.
-		// There shouldn't be very many so I don't mind the multiple loops.
-		for _, city := range matchingCities {
-			// Was the state abbreviation present? That sounds promising.
-			if strings.EqualFold(nSt, city.Region) {
-				c = city
-			}
-		}
-
-		for _, city := range matchingCities {
-			// Matches the state and country? Likely the best scenario,
-			// I'd call it the best match.
-			if strings.EqualFold(nSt, city.Region) && strings.EqualFold(nCo, city.Country) {
-				c = city
-			}
-		}
-
-		// If we still don't have a city, maybe we have a country with the
-		// city name, ie. "New York, USA"
-		// This is tougher because there's a "New York" in Florida, Kentucky,
-		// and more. Let's use population to assist if we can.
-		if c.City == "" {
-			matchingCountryCities := []GeobedCity{}
-			for _, city := range matchingCities {
-				if strings.EqualFold(nCo, city.Country) {
-					matchingCountryCities = append(matchingCountryCities, city)
-				}
-			}
-
-			// If someone says, "New York, USA" they most likely mean
-			// New York, NY because it's the largest city.
-			// Specific locations are often implied based on size or
-			// popularity even though the names aren't unique.
-			biggestCity := GeobedCity{}
-			for _, city := range matchingCountryCities {
-				if city.Population > biggestCity.Population {
-					biggestCity = city
-				}
-			}
-			c = biggestCity
-		}
+		c = filterMatchingCities(nCo, nSt, matchingCities)
 	}
 
 	return c
 }
 
-// When geocoding, this provides a scored best match.
-func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
-	nCo, nSt, abbrevSlice, nSlice := g.extractLocationPieces(n)
-	// Take the renaming unclassified pieces (those not likely to be
-	// abbreviations) and get our search range.
-	// These pieces are likely contain the city name. Narrowing down
-	// the search range will make the lookup faster.
-	ranges := g.getSearchRange(nSlice)
+func scoreCountryMatch(v GeobedCity, currentKey int, bestMatchingKeys map[int]int, nCo string) {
+	// A discovered country name converted into a country code
+	if nCo != "" {
+		if nCo == v.Country {
+			if val, ok := bestMatchingKeys[currentKey]; ok {
+				bestMatchingKeys[currentKey] = val + 4
+			} else {
+				bestMatchingKeys[currentKey] = 4
+			}
+		}
+	}
+}
+
+func scoreStateMatch(v GeobedCity, currentKey int, bestMatchingKeys map[int]int, nSt string) {
+	// A discovered state name converted into a region code
+	if nSt != "" {
+		if nSt == v.Region {
+			if val, ok := bestMatchingKeys[currentKey]; ok {
+				bestMatchingKeys[currentKey] = val + 4
+			} else {
+				bestMatchingKeys[currentKey] = 4
+			}
+		}
+	}
+}
+
+func scoreAlternativeNames(v GeobedCity, currentKey int, bestMatchingKeys map[int]int, query string) {
+	// If any alternate names can be discovered, take them into consideration.
+	if v.CityAlt != "" {
+		alts := strings.Fields(v.CityAlt)
+		for _, altV := range alts {
+			if strings.EqualFold(altV, query) {
+				if val, ok := bestMatchingKeys[currentKey]; ok {
+					bestMatchingKeys[currentKey] = val + 3
+				} else {
+					bestMatchingKeys[currentKey] = 3
+				}
+			}
+			// Exact, a case-sensitive match means a lot.
+			if altV == query {
+				if val, ok := bestMatchingKeys[currentKey]; ok {
+					bestMatchingKeys[currentKey] = val + 5
+				} else {
+					bestMatchingKeys[currentKey] = 5
+				}
+			}
+		}
+	}
+}
+
+func scoreFuzzyMatches(v GeobedCity, currentKey int, bestMatchingKeys map[int]int, query, nCo, nSt string, abbrevSlice, nSlice []string) {
+
+	// Special case. Airport codes and other short 3 letter abbreviations,
+	// ie. NYC and SFO
+	// Country codes could present problems here. It seems to work for NYC,
+	// but not SFO (which there are multiple SFOs actually).
+	// Leaving it for now, but airport codes are tricky (though they are
+	// popular on Twitter). These must be exact (case sensitive) matches.
+	// if len(n) == 3 {
+	// 	alts := strings.Split(v.CityAlt, ",")
+	// 	for _, altV := range alts {
+	// 		if altV != "" {
+	// 			if altV == n {
+	// 				if val, ok := bestMatchingKeys[currentKey]; ok {
+	// 					bestMatchingKeys[currentKey] = val + 4
+	// 				} else {
+	// 					bestMatchingKeys[currentKey] = 4
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
+
+	// Abbreviations for state/country
+	// Region (state/province)
+	for _, av := range abbrevSlice {
+		lowerAv := toLower(av)
+		if len(av) == 2 && strings.EqualFold(v.Region, lowerAv) {
+			if val, ok := bestMatchingKeys[currentKey]; ok {
+				bestMatchingKeys[currentKey] = val + 5
+			} else {
+				bestMatchingKeys[currentKey] = 5
+			}
+		}
+
+		// Country (worth 2 points if exact match)
+		if len(av) == 2 && strings.EqualFold(v.Country, lowerAv) {
+			if val, ok := bestMatchingKeys[currentKey]; ok {
+				bestMatchingKeys[currentKey] = val + 3
+			} else {
+				bestMatchingKeys[currentKey] = 3
+			}
+		}
+	}
+
+	scoreCountryMatch(v, currentKey, bestMatchingKeys, nCo)
+	scoreStateMatch(v, currentKey, bestMatchingKeys, nSt)
+	scoreAlternativeNames(v, currentKey, bestMatchingKeys, query)
+
+	// Exact city name matches mean a lot.
+	if strings.EqualFold(query, v.City) {
+		if val, ok := bestMatchingKeys[currentKey]; ok {
+			bestMatchingKeys[currentKey] = val + 7
+		} else {
+			bestMatchingKeys[currentKey] = 7
+		}
+	}
+
+}
+
+func (g *GeoBed) getBestFuzzyMatches(ranges []r, query, nCo, nSt string, abbrevSlice, nSlice []string) (map[int]int, int) {
 
 	var bestMatchingKeys = map[int]int{}
 	var bestMatchingKey = 0
+
 	for _, rng := range ranges {
 		// When adjusting the range, the keys become out of sync. Start from rng.f
 		currentKey := rng.f
@@ -700,106 +826,14 @@ func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
 			// Mainly useful for strings like: "Austin, TX" or "Austin TX"
 			// (locations with US state codes). Smile if your location string is this simple.
 			if nSt != "" {
-				if strings.EqualFold(n, v.City) && strings.EqualFold(nSt, v.Region) {
-					return v
+				if strings.EqualFold(query, v.City) && strings.EqualFold(nSt, v.Region) {
+					bestMatchingKeys[0] = currentKey
+					bestMatchingKey = currentKey
+					return bestMatchingKeys, bestMatchingKey
 				}
 			}
 
-			// Special case. Airport codes and other short 3 letter abbreviations,
-			// ie. NYC and SFO
-			// Country codes could present problems here. It seems to work for NYC,
-			// but not SFO (which there are multiple SFOs actually).
-			// Leaving it for now, but airport codes are tricky (though they are
-			// popular on Twitter). These must be exact (case sensitive) matches.
-			// if len(n) == 3 {
-			// 	alts := strings.Split(v.CityAlt, ",")
-			// 	for _, altV := range alts {
-			// 		if altV != "" {
-			// 			if altV == n {
-			// 				if val, ok := bestMatchingKeys[currentKey]; ok {
-			// 					bestMatchingKeys[currentKey] = val + 4
-			// 				} else {
-			// 					bestMatchingKeys[currentKey] = 4
-			// 				}
-			// 			}
-			// 		}
-			// 	}
-			// }
-
-			// Abbreviations for state/country
-			// Region (state/province)
-			for _, av := range abbrevSlice {
-				lowerAv := toLower(av)
-				if len(av) == 2 && strings.EqualFold(v.Region, lowerAv) {
-					if val, ok := bestMatchingKeys[currentKey]; ok {
-						bestMatchingKeys[currentKey] = val + 5
-					} else {
-						bestMatchingKeys[currentKey] = 5
-					}
-				}
-
-				// Country (worth 2 points if exact match)
-				if len(av) == 2 && strings.EqualFold(v.Country, lowerAv) {
-					if val, ok := bestMatchingKeys[currentKey]; ok {
-						bestMatchingKeys[currentKey] = val + 3
-					} else {
-						bestMatchingKeys[currentKey] = 3
-					}
-				}
-			}
-
-			// A discovered country name converted into a country code
-			if nCo != "" {
-				if nCo == v.Country {
-					if val, ok := bestMatchingKeys[currentKey]; ok {
-						bestMatchingKeys[currentKey] = val + 4
-					} else {
-						bestMatchingKeys[currentKey] = 4
-					}
-				}
-			}
-
-			// A discovered state name converted into a region code
-			if nSt != "" {
-				if nSt == v.Region {
-					if val, ok := bestMatchingKeys[currentKey]; ok {
-						bestMatchingKeys[currentKey] = val + 4
-					} else {
-						bestMatchingKeys[currentKey] = 4
-					}
-				}
-			}
-
-			// If any alternate names can be discovered, take them into consideration.
-			if v.CityAlt != "" {
-				alts := strings.Fields(v.CityAlt)
-				for _, altV := range alts {
-					if strings.EqualFold(altV, n) {
-						if val, ok := bestMatchingKeys[currentKey]; ok {
-							bestMatchingKeys[currentKey] = val + 3
-						} else {
-							bestMatchingKeys[currentKey] = 3
-						}
-					}
-					// Exact, a case-sensitive match means a lot.
-					if altV == n {
-						if val, ok := bestMatchingKeys[currentKey]; ok {
-							bestMatchingKeys[currentKey] = val + 5
-						} else {
-							bestMatchingKeys[currentKey] = 5
-						}
-					}
-				}
-			}
-
-			// Exact city name matches mean a lot.
-			if strings.EqualFold(n, v.City) {
-				if val, ok := bestMatchingKeys[currentKey]; ok {
-					bestMatchingKeys[currentKey] = val + 7
-				} else {
-					bestMatchingKeys[currentKey] = 7
-				}
-			}
+			scoreFuzzyMatches(v, currentKey, bestMatchingKeys, query, nCo, nSt, abbrevSlice, nSlice)
 
 			for _, ns := range nSlice {
 				ns = strings.TrimSuffix(ns, ",")
@@ -829,6 +863,23 @@ func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
 
 			}
 		}
+	}
+
+	return bestMatchingKeys, bestMatchingKey
+}
+
+// When geocoding, this provides a scored best match.
+func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
+	nCo, nSt, abbrevSlice, nSlice := g.extractLocationPieces(n)
+	// Take the renaming unclassified pieces (those not likely to be
+	// abbreviations) and get our search range.
+	// These pieces are likely contain the city name. Narrowing down
+	// the search range will make the lookup faster.
+	ranges := g.getSearchRange(nSlice)
+
+	bestMatchingKeys, bestMatchingKey := g.getBestFuzzyMatches(ranges, n, nCo, nSt, abbrevSlice, nSlice)
+	if len(bestMatchingKeys) == 1 {
+		return g.c[bestMatchingKey]
 	}
 
 	// If no country was found, look at population as a factor. Is it obvious?
