@@ -813,7 +813,7 @@ func (g *GeoBed) fuzzyMatchLocation(n string) GeobedCity {
 					}
 				}
 
-				// If there's an exat match, maybe there was noise in the string
+				// If there's an exact match, maybe there was noise in the string
 				// so it could be the full city name, but unlikely. For
 				// example, "New" or "Los" is in many city names.
 				// Still, give it a point because it could be the bulkier part

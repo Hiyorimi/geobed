@@ -26,15 +26,23 @@ func (s *GeobedSuite) SetUpSuite(c *C) {
 	// names has just "Big Apple" ... It may be worth trying to improve this though.
 	//s.testLocations = append(s.testLocations, map[string]string{"query": "Big Apple", "city": "New York City", "country": "US", "region": "NY"})
 
-	//s.testLocations = append(s.testLocations, map[string]string{"query": "NYC", "city": "New York City", "country": "US", "region": "NY"})
+	//s.testLocations = append(s.testLocations, map[string]string{
+	//	"query": "NYC",
+	//	"city": "New York City",
+	//	"country": "US",
+	//	"region": "NY",
+	//})
 
-	s.testLocations = append(s.testLocations, map[string]string{"query": "New York, NY", "city": "New York City", "country": "US", "region": "NY"})
-	//s.testLocations = append(s.testLocations, map[string]string{"query": "New York", "city": "New York City", "country": "US", "region": "NY"})
+	//s.testLocations = append(s.testLocations, map[string]string{"query": "New York, NY",
+	//	"city": "New York City",
+	//	"country": "US",
+	//	"region": "NY"})
+	//s.testLocations = append(s.testLocations, map[string]string{"query": "New York City", "city": "New York City", "country": "US", "region": "NY"})
 	//s.testLocations = append(s.testLocations, map[string]string{"query": "Austin TX", "city": "Austin", "country": "US", "region": "TX"})
 	//s.testLocations = append(s.testLocations, map[string]string{"query": "tx austin", "city": "Austin", "country": "US", "region": "TX"})
 	//s.testLocations = append(s.testLocations, map[string]string{"query": "Paris, TX", "city": "Paris", "country": "US", "region": "TX"})
-	//s.testLocations = append(s.testLocations, map[string]string{"query": "New Paris, IN", "city": "New Paris", "country": "US", "region": "IN"})
-	//s.testLocations = append(s.testLocations, map[string]string{"query": "Sweden, Stockholm", "city": "Stockholm Center", "country": "SE", "region": "26"})
+	s.testLocations = append(s.testLocations, map[string]string{"query": "New Paris, IN", "city": "New Paris", "country": "US", "region": "IN"})
+	//s.testLocations = append(s.testLocations, map[string]string{"query": "Sweden, Stockholm", "city": "Stockholm", "country": "SE", "region": "26"})
 	//s.testLocations = append(s.testLocations, map[string]string{"query": "Stockholm", "city": "Stockholm", "country": "SE", "region": "26"})
 	s.testLocations = append(s.testLocations, map[string]string{"query": "Newport Beach, Orange County ", "city": "Newport Beach", "country": "US", "region": "CA"})
 	s.testLocations = append(s.testLocations, map[string]string{"query": "Newport Beach", "city": "Newport Beach", "country": "US", "region": "CA"})
@@ -162,10 +170,46 @@ func TestFuzzyMatchLocation (t *testing.T) {
 	assert.InDelta(t, 37.61, result.Longitude, 0.2)
 }
 
+func TestGeoBed_store(t *testing.T) {
+	var err error
+	g = NewGeobed()
+	err = g.store()
+	if assert.Nil(t, err){
+		assert.FileExists(t,"./geobed-data/g.c.dmp")
+		assert.FileExists(t,"./geobed-data/g.co.dmp")
+		assert.FileExists(t,"./geobed-data/cityNameIdx.dmp")
+	}
+
+}
+
+func TestGeoBed_downloadDataSets(t *testing.T) {
+	g = NewGeobed()
+	g.downloadDataSets()
+	assert.FileExists(t,"./geobed-data/g.c.dmp")
+	assert.FileExists(t,"./geobed-data/g.co.dmp")
+	assert.FileExists(t,"./geobed-data/cityNameIdx.dmp")
+}
+
+func TestGeoBed_loadDataSets(t *testing.T) {
+	g = GeoBed{}
+	assert.FileExists(t,"./geobed-data/g.c.dmp")
+	assert.FileExists(t,"./geobed-data/g.co.dmp")
+	assert.FileExists(t,"./geobed-data/cityNameIdx.dmp")
+	g.loadDataSets()
+	assert.NotEqual(t, 0, len(g.c))
+}
+
+
 func (s *GeobedSuite) TestGeocode(c *C) {
-	//g := NewGeobed()
+	var r GeobedCity
+	g = NewGeobed()
 	for _, v := range s.testLocations {
-		r := g.Geocode(v["query"])
+		if _, ok := v["exact_match"]; ok {
+			r = g.Geocode(v["query"], GeocodeOptions{true})
+		} else {
+			r = g.Geocode(v["query"])
+		}
+
 		c.Assert(r.City, Equals, v["city"])
 		c.Assert(r.Country, Equals, v["country"])
 		// Due to all the data and various sets, the region can be a little weird.
@@ -177,7 +221,7 @@ func (s *GeobedSuite) TestGeocode(c *C) {
 		}
 	}
 
-	r := g.Geocode("")
+	r = g.Geocode("")
 	c.Assert(r.City, Equals, "")
 
 	r = g.Geocode(" ")
@@ -185,7 +229,7 @@ func (s *GeobedSuite) TestGeocode(c *C) {
 }
 
 func (s *GeobedSuite) TestReverseGeocode(c *C) {
-	//g := NewGeobed()
+	g = NewGeobed()
 
 	r := g.ReverseGeocode(30.26715, -97.74306)
 	c.Assert(r.City, Equals, "Austin")
@@ -205,6 +249,10 @@ func (s *GeobedSuite) TestReverseGeocode(c *C) {
 
 	r = g.ReverseGeocode(51.51279, -0.09184)
 	c.Assert(r.City, Equals, "City of London")
+
+	r = g.ReverseGeocode(59.93186166742998,30.320993812833134)
+	c.Assert(r.City, Equals, "Saint Petersburg")
+
 }
 
 func (s *GeobedSuite) TestNext(c *C) {
